@@ -45,6 +45,13 @@ to anon
 using (true)
 with check (true);
 
+drop policy if exists "Allow dashboard deletes" on public.deals;
+create policy "Allow dashboard deletes"
+on public.deals
+for delete
+to anon
+using (true);
+
 insert into storage.buckets (id, name, public)
 values ('deal-documents', 'deal-documents', false)
 on conflict (id) do nothing;
@@ -70,3 +77,10 @@ for update
 to anon
 using (bucket_id = 'deal-documents')
 with check (bucket_id = 'deal-documents');
+
+drop policy if exists "Allow dashboard document deletes" on storage.objects;
+create policy "Allow dashboard document deletes"
+on storage.objects
+for delete
+to anon
+using (bucket_id = 'deal-documents');
