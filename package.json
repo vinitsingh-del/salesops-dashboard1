@@ -1,0 +1,11 @@
+{
+  "name": "salesops-dashboard",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "cloudflare:dev": "npx wrangler pages dev . --compatibility-date=2026-05-21 --kv SALESOPS_KV",
+    "cloudflare:deploy": "npx wrangler pages deploy . --project-name salesops-dashboard"
+  }
+}
