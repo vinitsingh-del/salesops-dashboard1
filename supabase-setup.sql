@@ -44,3 +44,29 @@ for update
 to anon
 using (true)
 with check (true);
+
+insert into storage.buckets (id, name, public)
+values ('deal-documents', 'deal-documents', false)
+on conflict (id) do nothing;
+
+drop policy if exists "Allow dashboard document reads" on storage.objects;
+create policy "Allow dashboard document reads"
+on storage.objects
+for select
+to anon
+using (bucket_id = 'deal-documents');
+
+drop policy if exists "Allow dashboard document uploads" on storage.objects;
+create policy "Allow dashboard document uploads"
+on storage.objects
+for insert
+to anon
+with check (bucket_id = 'deal-documents');
+
+drop policy if exists "Allow dashboard document updates" on storage.objects;
+create policy "Allow dashboard document updates"
+on storage.objects
+for update
+to anon
+using (bucket_id = 'deal-documents')
+with check (bucket_id = 'deal-documents');
