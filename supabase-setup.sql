@@ -21,6 +21,17 @@ before update on public.deals
 for each row
 execute function public.set_updated_at();
 
+alter table public.deals replica identity full;
+
+do $$
+begin
+  alter publication supabase_realtime add table public.deals;
+exception
+  when duplicate_object then null;
+  when undefined_object then null;
+end;
+$$;
+
 alter table public.deals enable row level security;
 
 drop policy if exists "Allow dashboard reads" on public.deals;
