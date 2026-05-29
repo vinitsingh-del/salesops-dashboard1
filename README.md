@@ -1,73 +1,66 @@
-# SalesOps Dashboard
+# Sales DB
 
-This folder now contains a local backend-backed version of the SalesOps dashboard.
+Clean deploy package for the SalesOps dashboard.
 
-## Run It
+## Files
 
-```bash
-npm start
+- `index.html` - the complete dashboard frontend.
+- `supabase-setup.sql` - the backend database, realtime, storage bucket, and policies.
+- `SalesOps_Dashboard_PRD.docx` - product requirements document.
+- `.nojekyll` - keeps GitHub Pages from altering the static site.
+
+## Create The Supabase Backend
+
+1. Open Supabase and create a new project.
+2. Go to `SQL Editor`.
+3. Open `supabase-setup.sql` from this folder.
+4. Paste the full SQL into Supabase and run it.
+5. Confirm that the `deals` table exists under `Table Editor`.
+6. Confirm that the `deal-documents` storage bucket exists under `Storage`.
+7. Go to `Project Settings` > `API`.
+8. Copy the new `Project URL`.
+9. Copy the new `anon public` key.
+10. Open `index.html` and replace:
+
+```js
+const SUPABASE_URL = "YOUR_NEW_SUPABASE_PROJECT_URL";
+const SUPABASE_ANON_KEY = "YOUR_NEW_SUPABASE_ANON_PUBLIC_KEY";
 ```
 
-Then open:
+After this, the dashboard will read and write deals from Supabase. Refreshing the page will keep the latest saved stage, invoice status, churn risk, next action date, documents, and deal details.
+
+## Create The New GitHub Link
+
+1. Create a new GitHub repository named `sales-db`.
+2. Upload every file from this `Sales DB` folder into the repository root.
+3. Go to `Settings` > `Pages`.
+4. Set source to `Deploy from a branch`.
+5. Choose branch `main` and folder `/root`.
+6. Save.
+
+The new GitHub Pages link will be:
 
 ```text
-http://127.0.0.1:3000
+https://YOUR_GITHUB_USERNAME.github.io/sales-db/
 ```
 
-The existing `index.html` can also be opened directly from Finder, but saved changes require the backend to be running.
+## Important Backend Notes
 
-## What The Backend Saves
+- The dashboard does not reseed old sample data after refresh.
+- Supabase Realtime is enabled for the `deals` table.
+- Supabase Realtime is also enabled for document uploads, audit issues, and event history.
+- Deal documents are stored in the `deal-documents` bucket.
+- The `deals` table stores structured fields plus full deal metadata in JSON.
+- The `deal_documents` table stores every uploaded or linked NDA, agreement, proposal, and Refrens invoice.
+- The `deal_audit_issues` table stores open/closed system failure checks for each deal.
+- The `deal_events` table stores create, update, delete, stage, invoice, churn, and dashboard save activity.
+- System failure checks are handled in the dashboard audit logic and synced back into Supabase.
 
-The backend stores dashboard data in:
+## Recommended First Test
 
-```text
-data/db.json
-```
-
-Currently supported saved actions:
-
-- load all active and churned lead records
-- add a new deal
-- update a deal stage
-- update invoice status
-- update next action, action date, and urgency
-
-## API
-
-- `GET /api/health`
-- `GET /api/state`
-- `POST /api/deals`
-- `PATCH /api/deals/:id`
-
-## Cloudflare Hosting
-
-This project is ready for Cloudflare Pages with Functions and KV.
-
-1. Login to Cloudflare:
-
-```bash
-npx wrangler login
-```
-
-2. Create a KV namespace:
-
-```bash
-npx wrangler kv namespace create SALESOPS_KV
-npx wrangler kv namespace create SALESOPS_KV --preview
-```
-
-3. Copy the returned namespace IDs into `wrangler.toml`.
-
-4. Test locally through Cloudflare's runtime:
-
-```bash
-npm run cloudflare:dev
-```
-
-5. Deploy:
-
-```bash
-npm run cloudflare:deploy
-```
-
-After deployment, Cloudflare will show the live Pages URL. The frontend uses the same `/api/*` routes online, and lead updates are stored in Cloudflare KV.
+1. Add a new deal.
+2. Change its stage.
+3. Mark churn risk as `Medium` or `High` and add a reason.
+4. Upload agreement and invoice documents.
+5. Refresh the page.
+6. Confirm the same data is still visible.

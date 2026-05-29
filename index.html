@@ -200,19 +200,16 @@ const api = async (path, options = {}) => {
   if (path === "/api/state") {
     const { data, error } = await supabaseClient.from("deals").select("*").order("updated_at", { ascending:false });
     if (error) throw new Error(error.message);
-    if (!data?.length) {
-      const seedRows = initDeals.map(deal => dealToRow(deal));
-      const seeded = await supabaseClient.from("deals").upsert(seedRows, { onConflict:"deal_id" }).select("*").order("updated_at", { ascending:false });
-      if (seeded.error) throw new Error(seeded.error.message);
-      return { deals:(seeded.data || []).map(dealFromRow), churned:CHURNED };
-    }
     return { deals:(data || []).map(dealFromRow), churned:CHURNED };
   }
   if (path === "/api/deals" && method === "POST") {
     const deal = body.deal;
     const { data, error } = await supabaseClient.from("deals").upsert(dealToRow(deal), { onConflict:"deal_id" }).select("*").single();
     if (error) throw new Error(error.message);
-    return dealFromRow(data);
+    const saved = dealFromRow(data);
+    await syncDealAudit(saved);
+    await logDealEvent(saved.id, "deal_saved", "Deal saved from dashboard", { stage:saved.stage, invoice_status:saved.inv, churn_risk:saved.churnRisk });
+    return saved;
   }
   const match = path.match(/^\/api\/deals\/(.+)$/);
   if (match && method === "PATCH") {
@@ -224,10 +221,14 @@ const api = async (path, options = {}) => {
     const updated = { ...(dealFromRow(current.data) || fullDeal || {}), ...patch, id:dealId };
     const { data, error } = await supabaseClient.from("deals").upsert(dealToRow(updated), { onConflict:"deal_id" }).select("*").single();
     if (error) throw new Error(error.message);
-    return dealFromRow(data);
+    const saved = dealFromRow(data);
+    await syncDealAudit(saved);
+    await logDealEvent(saved.id, "deal_patch", "Deal updated from dashboard", { patch });
+    return saved;
   }
   if (match && method === "DELETE") {
     const dealId = decodeURIComponent(match[1]);
+    await logDealEvent(dealId, "deal_delete_requested", "Deal delete requested from dashboard", {});
     const { error } = await supabaseClient.from("deals").delete().eq("deal_id", String(dealId));
     if (error) throw new Error(error.message);
     return { ok:true };
@@ -241,6 +242,47 @@ const uploadDealFile = async (dealId, kind, file) => {
   const path = `${dealId}/${kind}-${Date.now()}-${safe}`;
   const { error } = await supabaseClient.storage.from("deal-documents").upload(path, file, { upsert:true, contentType:file.type || undefined });
   return error ? { name:file.name, error:error.message } : { name:file.name, bucket:"deal-documents", path };
+};
+const recordDealDocument = async (dealId, kind, doc) => {
+  if (!supabaseClient || !doc) return;
+  const row = {
+    deal_id:String(dealId),
+    document_kind:kind === "agreement" ? "agreement-copy" : kind === "invoice" ? "refrens-invoice" : kind,
+    file_name:doc.name || "",
+    bucket_id:doc.bucket || "deal-documents",
+    storage_path:doc.path || "",
+    external_url:typeof doc === "string" ? doc : (doc.url || ""),
+    upload_status:doc.error ? "failed" : (doc.path ? "uploaded" : "linked"),
+    error_message:doc.error || "",
+    metadata:doc
+  };
+  const { error } = await supabaseClient.from("deal_documents").insert(row);
+  if (error) console.warn("Document record was not saved", error.message);
+};
+const syncDealAudit = async (deal) => {
+  if (!supabaseClient || !deal?.id) return;
+  const failures = systemFailures(normalizedDeal(deal));
+  await supabaseClient.from("deal_audit_issues").update({ is_open:false }).eq("deal_id", String(deal.id)).eq("is_open", true);
+  if (!failures.length) return;
+  const rows = failures.map(f => ({
+    deal_id:String(deal.id),
+    issue_type:f.type,
+    severity:f.severity,
+    fix:f.fix,
+    is_open:true,
+    source:"dashboard"
+  }));
+  const { error } = await supabaseClient.from("deal_audit_issues").insert(rows);
+  if (error) console.warn("Audit records were not saved", error.message);
+};
+const logDealEvent = async (dealId, eventType, summary, payload = {}) => {
+  if (!supabaseClient) return;
+  await supabaseClient.from("deal_events").insert({
+    deal_id:dealId ? String(dealId) : null,
+    event_type:eventType,
+    event_summary:summary || eventType,
+    payload
+  });
 };
 const openDealFile = async (doc) => {
   if (!doc) return;
@@ -777,6 +819,7 @@ function App() {
       const inferred = extractRefrensInvoiceNumber(file.name);
       if (inferred && (!deal.inum || deal.inum === "--")) patch.inum = inferred;
     }
+    await recordDealDocument(deal.id, kind, uploaded);
     await persistDealPatch(deal.id, patch, `${kind === "invoice" ? "Refrens invoice" : kind === "agreement" ? "Agreement copy" : "NDA"} uploaded`);
   };
   const deleteDeal = async (deal) => {
@@ -838,6 +881,13 @@ function App() {
     };
     try {
       const saved = await api("/api/deals", {method:"POST", body:JSON.stringify({deal:newD})});
+      await Promise.all([
+        recordDealDocument(newId, "agreement", agreementCopy),
+        recordDealDocument(newId, "invoice", invoiceCopy),
+        addForm.agreementLink ? recordDealDocument(newId, "agreement", { name:"Agreement link", url:addForm.agreementLink }) : null,
+        addForm.ndaLink ? recordDealDocument(newId, "nda", { name:"NDA link", url:addForm.ndaLink }) : null,
+        addForm.proposalLink ? recordDealDocument(newId, "proposal", { name:"Proposal link", url:addForm.proposalLink }) : null
+      ].filter(Boolean));
       setDeals(prev=>[normalizedDeal(saved),...prev]);
       setApiError("");
     } catch(err) {
